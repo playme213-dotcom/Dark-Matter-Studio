@@ -19,6 +19,17 @@ from agent_tools import (
     dispatch_tool_call,
     extract_all_tool_calls
 )
+from custom_skills import (
+    CUSTOM_SKILLS_REGISTRY,
+    call_skill_function,
+    get_all_skills_for_prompt,
+    list_custom_skills,
+    load_custom_skill,
+    reload_all,
+    write_custom_skill,
+    delete_custom_skill,
+    unload_custom_skill,
+)
 
 # =====================================================================
 # CONFIGURATION
@@ -77,6 +88,17 @@ LOADER_STATE = {
     }
 }
 LOADER_URLS = {"Colibri": COLIBRI_BASE_URL, "LiteLLM": LITELLM_BASE_URL, "Ollama": os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434")}
+
+# Initialize custom skills from skills/custom/ directory
+try:
+    CUSTOM_SKILLS_LOAD_RESULT = reload_all()
+    if CUSTOM_SKILLS_LOAD_RESULT:
+        loaded_count = sum(1 for r in CUSTOM_SKILLS_LOAD_RESULT if r.get("status") == "success")
+        error_count = sum(1 for r in CUSTOM_SKILLS_LOAD_RESULT if r.get("status") == "error")
+        print(f"Custom skills: {loaded_count} loaded, {error_count} failed")
+except Exception as exc:
+    print(f"Custom skills init error: {exc}")
+    CUSTOM_SKILLS_LOAD_RESULT = []
 
 def _litellm_mode():
     mode = str(LOADER_STATE.get("settings", {}).get("litellm_mode", "colibri")).lower()
@@ -1122,6 +1144,11 @@ def build_colibri_messages(session_id: str, current_user_msg: str, selected_skil
     if active_skills:
         sys_prompt += "\n\n# Task-Specific Built-in Guidance\n" + active_skills
 
+    # Add custom user-defined Python skills
+    custom_skills_text = get_all_skills_for_prompt()
+    if custom_skills_text:
+        sys_prompt += custom_skills_text
+
     formatted = [{"role": "system", "content": sys_prompt}]
     raw_history = []
 
@@ -1622,6 +1649,55 @@ def configure_loader():
 @app.route("/api/skills", methods=["GET"])
 def skills_info():
     return jsonify({"skills": [{"name": label, "file": filename} for filename, label in SKILL_FILES.items()]})
+
+@app.route("/api/custom-skills", methods=["GET"])
+def custom_skills_list():
+    return jsonify({"skills": list_custom_skills()})
+
+@app.route("/api/custom-skills", methods=["POST"])
+def custom_skills_write():
+    data = request.json or {}
+    name = data.get("name", "").strip()
+    content = data.get("content", "")
+    if not name:
+        return jsonify({"status": "error", "output": "name is required"}), 400
+    return jsonify(write_custom_skill(name, content))
+
+@app.route("/api/custom-skills/<name>", methods=["GET", "DELETE", "PUT"])
+def custom_skills_detail(name):
+    if request.method == "GET":
+        for s in list_custom_skills():
+            if s["name"] == name:
+                return jsonify(s)
+        return jsonify({"status": "error", "output": f"Skill '{name}' not found"}), 404
+    if request.method == "DELETE":
+        return jsonify(delete_custom_skill(name))
+    if request.method == "PUT":
+        data = request.json or {}
+        content = data.get("content", "")
+        return jsonify(write_custom_skill(name, content))
+
+@app.route("/api/custom-skills/<name>/load", methods=["POST"])
+def custom_skills_load(name):
+    return jsonify(load_custom_skill(name))
+
+@app.route("/api/custom-skills/<name>/unload", methods=["POST"])
+def custom_skills_unload(name):
+    return jsonify(unload_custom_skill(name))
+
+@app.route("/api/custom-skills/<name>/call", methods=["POST"])
+def custom_skills_call(name):
+    data = request.json or {}
+    func_name = data.get("function", "")
+    args = data.get("args", [])
+    kwargs = data.get("kwargs", {})
+    if not func_name:
+        return jsonify({"status": "error", "output": "function is required"}), 400
+    return jsonify(call_skill_function(name, func_name, *args, **kwargs))
+
+@app.route("/api/custom-skills/reload", methods=["POST"])
+def custom_skills_reload():
+    return jsonify({"results": reload_all()})
 
 @app.route("/screenshots/<path:filename>")
 def serve_screenshot(filename):
@@ -2525,6 +2601,18 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     #sidebar.collapsed button span { display: none; }
 
     #agent-dock { transition: right 0.25s ease; }
+    #agent-dock.dock-collapsed { width: 48px !important; padding: 8px !important; overflow: hidden; }
+    #agent-dock.dock-collapsed .tab-panel { display: none !important; }
+    #agent-dock.dock-collapsed > div:first-child { justify-content: center; padding: 0; }
+    #agent-dock.dock-collapsed .token-monitor { display: none; }
+    #agent-dock.dock-collapsed h2 { display: none; }
+    body.dock-collapsed { padding-right: 48px; }
+    #agent-dock.dock-collapsed { width: 48px !important; padding: 8px !important; overflow: hidden; }
+    #agent-dock.dock-collapsed .tab-panel { display: none !important; }
+    #agent-dock.dock-collapsed > div:first-child { justify-content: center; padding: 0; }
+    #agent-dock.dock-collapsed .token-monitor { display: none; }
+    #agent-dock.dock-collapsed h2 { display: none; }
+    body.dock-collapsed { padding-right: 48px; }
 
     /* Tab panels */
     .tab-panel { display: none; }
@@ -2834,8 +2922,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         <h2 style="font-weight:800;color:#6ee7b7;font-size:14px;margin:0">AGENT CONTROL</h2>
         <div id="token-monitor" class="token-monitor mt-1">Tokens: — / —</div>
       </div>
-      <button id="toggle-sidebar" type="button" class="text-slate-400 hover:text-slate-200 transition p-1 text-sm cursor-pointer">
-        <i class="fa-solid fa-bars"></i>
+      <button id="toggle-dock" type="button" class="text-slate-400 hover:text-slate-200 transition p-1 text-sm cursor-pointer">
+        <i class="fa-solid fa-chevron-left"></i>
       </button>
     </div>
 
@@ -2935,6 +3023,28 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         <p id="python-env-status" style="font-size:10px;color:#94a3b8;margin-top:5px">Selected interpreter is injected into every agent prompt.</p>
       </section>
       <section style="border-top:1px solid #263244;margin-top:16px;padding-top:12px"><h3 style="font-weight:bold;color:#cbd5e1;margin-bottom:8px">Skills</h3><div id="skills-list" style="display:grid;gap:6px"></div></section>
+      <section style="border-top:1px solid #263244;margin-top:14px;padding-top:12px">
+        <h3 style="font-weight:bold;color:#6ee7b7;margin-bottom:8px;display:flex;align-items:center;gap:6px"><i class="fa-solid fa-cubes"></i> Custom Skills (.py)</h3>
+        <p style="font-size:10px;color:#94a3b8;margin-bottom:8px">Drop .py files into skills/custom/ or add below. Each file must pass its test_ functions before loading.</p>
+        <div style="display:flex;gap:6px;margin-bottom:8px">
+          <input id="custom-skill-name" type="text" placeholder="skill_name" style="flex:1;padding:6px;background:#0f172a;border:1px solid #334155;border-radius:6px;color:#e2e8f0;font:11px monospace">
+          <button id="refresh-custom-skills" style="padding:6px 10px;background:#111827;border:1px solid #334155;border-radius:6px;color:#e2e8f0">↻</button>
+        </div>
+        <div id="custom-skills-list" style="display:grid;gap:6px"></div>
+        <div style="display:flex;gap:4px;margin-top:8px">
+          <textarea id="custom-skill-content" placeholder="# New skill
+
+def my_function(x):
+    return x * 2
+
+def test_my_function():
+    return my_function(5) == 10" rows="6" style="width:100%;background:#0f172a;border:1px solid #334155;border-radius:6px;color:#e2e8f0;font:11px monospace;padding:8px"></textarea>
+        </div>
+        <div style="display:flex;gap:6px;margin-top:8px">
+          <input id="custom-skill-save-name" type="text" placeholder="save as name" style="flex:1;padding:6px;background:#0f172a;border:1px solid #334155;border-radius:6px;color:#e2e8f0;font:11px monospace">
+          <button id="save-custom-skill" style="flex:1;background:#059669;padding:8px;border-radius:6px;font-weight:bold">Save Skill</button>
+        </div>
+      </section>
     </div>
 
     <!-- Tab Panel: Plan/Progress -->
@@ -3014,6 +3124,27 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       applySidebarCollapse();
     });
     applySidebarCollapse();
+
+    // Dock collapse
+    const dock = $('agent-dock');
+    let dockCollapsed = localStorage.getItem('darkMatterDockCollapsed') === 'true';
+    function applyDockCollapse() {
+      if (dockCollapsed) {
+        dock.classList.add('dock-collapsed');
+        document.body.classList.add('dock-collapsed');
+        $('toggle-dock').querySelector('i').className = 'fa-solid fa-chevron-right';
+      } else {
+        dock.classList.remove('dock-collapsed');
+        document.body.classList.remove('dock-collapsed');
+        $('toggle-dock').querySelector('i').className = 'fa-solid fa-chevron-left';
+      }
+    }
+    $('toggle-dock').addEventListener('click', () => {
+      dockCollapsed = !dockCollapsed;
+      localStorage.setItem('darkMatterDockCollapsed', String(dockCollapsed));
+      applyDockCollapse();
+    });
+    applyDockCollapse();
 
     // Tab switching
     const tabBtns = document.querySelectorAll('.tab-btn');
@@ -3417,6 +3548,65 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     setInterval(refreshSwarmBoard, 3000);
     refreshTokenMonitor();
     refreshSwarmBoard();
+
+    // Custom Skills UI
+    async function refreshCustomSkills() {
+      try {
+        const r = await fetch('/api/custom-skills', {cache: 'no-store'});
+        const d = await r.json();
+        const container = $('custom-skills-list');
+        if (!container) return;
+        const skills = d.skills || [];
+        container.innerHTML = '';
+        skills.forEach(s => {
+          const el = document.createElement('div');
+          el.className = 'bg-slate-800 border border-slate-700 rounded-lg p-3 flex flex-col gap-2';
+          const loadedCls = s.loaded ? 'text-emerald-400' : 'text-rose-400';
+          el.innerHTML = '<div class="flex items-center justify-between"><span class="text-xs font-bold">' + s.name + '</span><span class="text-[9px] ' + loadedCls + '">' + (s.loaded ? 'loaded' : 'not loaded') + '</span></div><div class="text-xs text-slate-300">Functions: ' + (s.functions || []).join(', ') || 'none' + '</div><div style="display:flex;gap:4px"><button onclick="toggleSkill(\'' + s.name + '\', ' + s.loaded + ')" style="flex:1;padding:4px 8px;background:' + (s.loaded ? '#7f1d1d' : '#065f46') + ';border-radius:4px;color:#e2e8f0;font-size:10px">' + (s.loaded ? 'Unload' : 'Load') + '</button><button onclick="deleteSkill(\'' + s.name + '\')" style="flex:1;padding:4px 8px;background:#7f1d1d;border-radius:4px;color:#e2e8f0;font-size:10px">Delete</button></div>';
+          container.appendChild(el);
+        });
+      } catch (e) {
+        console.error('refreshCustomSkills error', e);
+      }
+    }
+
+    async function toggleSkill(name, currentlyLoaded) {
+      if (currentlyLoaded) {
+        await fetch('/api/custom-skills/' + name + '/unload', {method: 'POST'});
+      } else {
+        await fetch('/api/custom-skills/' + name + '/load', {method: 'POST'});
+      }
+      refreshCustomSkills();
+    }
+
+    async function deleteSkill(name) {
+      if (!confirm("Delete skill '" + name + "'?")) return;
+      await fetch('/api/custom-skills/' + name, {method: 'DELETE'});
+      refreshCustomSkills();
+    }
+
+    if ($('refresh-custom-skills')) $('refresh-custom-skills').onclick = refreshCustomSkills;
+    if ($('save-custom-skill')) $('save-custom-skill').onclick = async () => {
+      const name = $('custom-skill-save-name')?.value?.trim();
+      const content = $('custom-skill-content')?.value || '';
+      if (!name) return alert('Enter a skill name');
+      try {
+        const r = await fetch('/api/custom-skills', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({name, content})
+        });
+        const d = await r.json();
+        if (!r.ok) return alert(d.output || 'Failed to save skill');
+        $('custom-skill-save-name').value = '';
+        $('custom-skill-content').value = '';
+        refreshCustomSkills();
+      } catch (e) {
+        alert('Error saving skill: ' + e.message);
+      }
+    }
+
+    refreshCustomSkills();
   </script>
 </body>
 </html>"""
