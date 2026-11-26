@@ -1699,6 +1699,41 @@ def custom_skills_call(name):
 def custom_skills_reload():
     return jsonify({"results": reload_all()})
 
+# Sandbox permission management routes
+@app.route("/api/sandbox", methods=["GET"])
+def sandbox_get():
+    """Get current sandbox configuration."""
+    return jsonify({
+        "sandbox_dir": SANDBOX_DIR,
+        "sandbox_require_confirm": SANDBOX_REQUIRE_CONFIRM,
+        "workspace_dir": get_workspace_dir()
+    })
+
+@app.route("/api/sandbox", methods=["POST"])
+def sandbox_set():
+    """Set sandbox directory and confirmation requirement."""
+    global SANDBOX_DIR, SANDBOX_REQUIRE_CONFIRM
+    data = request.json or {}
+    
+    if "sandbox_dir" in data:
+        new_dir = str(data["sandbox_dir"]).strip()
+        if new_dir:
+            abs_dir = os.path.abspath(os.path.expanduser(new_dir))
+            if not os.path.isdir(abs_dir):
+                return jsonify({"status": "error", "output": f"Directory not found: {abs_dir}"}), 400
+            SANDBOX_DIR = abs_dir
+        else:
+            SANDBOX_DIR = ""
+    
+    if "sandbox_require_confirm" in data:
+        SANDBOX_REQUIRE_CONFIRM = bool(data["sandbox_require_confirm"])
+    
+    return jsonify({
+        "status": "success",
+        "sandbox_dir": SANDBOX_DIR,
+        "sandbox_require_confirm": SANDBOX_REQUIRE_CONFIRM
+    })
+
 @app.route("/screenshots/<path:filename>")
 def serve_screenshot(filename):
     return send_from_directory(SCREENSHOT_DIR, filename)
@@ -2995,6 +3030,20 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         </div>
       </details>
 
+      <details style="margin:0 0 8px"><summary style="cursor:pointer;color:#a7f3d0;font-weight:bold">Sandbox Permissions</summary>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
+          <label style="display:flex;align-items:center;gap:8px;font-size:10px">
+            <input type="checkbox" id="toggle-sandbox-confirm" checked style="accent-color:#10b981">
+            <span>Require confirmation for file access outside sandbox</span>
+          </label>
+        </div>
+        <div style="display:flex;gap:4px;margin-top:8px">
+          <input id="sandbox-dir-input" type="text" placeholder="/path/to/sandbox" style="flex:1;padding:6px;background:#0f172a;border:1px solid #334155;border-radius:6px;color:#e2e8f0;font:11px monospace">
+          <button id="save-sandbox-dir" style="padding:6px 10px;background:#059669;border-radius:6px;font-weight:bold;color:#e2e8f0">Set Sandbox</button>
+        </div>
+        <div id="sandbox-status" style="font-size:10px;color:#94a3b8;margin-top:6px">No sandbox directory set</div>
+      </details>
+
       <details id="loader-parameters-details" open style="border-top:1px solid #263244;padding-top:12px"><summary id="loader-param-heading" style="cursor:pointer;color:#cbd5e1;font-weight:bold">Request Parameters</summary>
         <label>Temperature <span id="temp-val">0.2</span></label><input id="temperature" type="range" min="0" max="2" step="0.1" value="0.2" style="width:100%">
         <label>Top-p <span id="top-p-val">0.9</span></label><input id="top-p" type="range" min="0.1" max="1" step="0.05" value="0.9" style="width:100%">
@@ -3607,6 +3656,60 @@ def test_my_function():
     }
 
     refreshCustomSkills();
+
+    // Sandbox permissions UI
+    async function refreshSandbox() {
+      try {
+        const r = await fetch('/api/sandbox', {cache: 'no-store'});
+        const d = await r.json();
+        const input = $('sandbox-dir-input');
+        const status = $('sandbox-status');
+        if (input) input.value = d.sandbox_dir || '';
+        if (status) {
+          status.textContent = d.sandbox_dir
+            ? `Sandbox: ${d.sandbox_dir} (confirm: ${d.sandbox_require_confirm ? 'on' : 'off'})`
+            : 'No sandbox directory set';
+        }
+        if ($('toggle-sandbox-confirm')) $('toggle-sandbox-confirm').checked = d.sandbox_require_confirm !== false;
+      } catch (e) {
+        console.error('refreshSandbox error', e);
+      }
+    }
+
+    if ($('save-sandbox-dir')) $('save-sandbox-dir').onclick = async () => {
+      const input = $('sandbox-dir-input');
+      const val = input ? input.value.trim() : '';
+      try {
+        const r = await fetch('/api/sandbox', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({sandbox_dir: val})
+        });
+        const d = await r.json();
+        if (!r.ok) return alert(d.output || 'Failed to set sandbox');
+        refreshSandbox();
+      } catch (e) {
+        alert('Error setting sandbox: ' + e.message);
+      }
+    };
+
+    if ($('toggle-sandbox-confirm')) $('toggle-sandbox-confirm').addEventListener('change', async () => {
+      try {
+        const r = await fetch('/api/sandbox', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({sandbox_require_confirm: $('toggle-sandbox-confirm').checked})
+        });
+        const d = await r.json();
+        if (!r.ok) return alert(d.output || 'Failed to update sandbox settings');
+        refreshSandbox();
+      } catch (e) {
+        alert('Error updating sandbox: ' + e.message);
+      }
+    });
+
+    refreshCustomSkills();
+    refreshSandbox();
   </script>
 </body>
 </html>"""

@@ -56,6 +56,12 @@ def _load_initial_workspace() -> str:
 WORKSPACE_DIR = _load_initial_workspace()
 SCREENSHOT_DIR = os.path.join(WORKSPACE_DIR, "screenshots")
 
+# Sandbox permission system for agent access control
+# SANDBOX_DIR: When set, agents can freely access files inside this directory
+# SANDBOX_REQUIRE_CONFIRM: When True, accessing files outside SANDBOX_DIR requires explicit confirmation
+SANDBOX_DIR = ""
+SANDBOX_REQUIRE_CONFIRM = True
+
 
 def _normalize_permissions(filepath: str):
     """Compatibility no-op. Studio never silently changes ownership or permissions."""
@@ -239,6 +245,27 @@ def _resolve_safe_path(rel_or_abs_path: str) -> tuple[str, bool]:
     if not raw:
         return active_root, False
     target = os.path.realpath(raw if os.path.isabs(raw) else os.path.join(active_root, raw))
+    
+    # Check sandbox boundaries
+    sandbox_dir = os.path.realpath(SANDBOX_DIR) if SANDBOX_DIR else None
+    
+    if sandbox_dir:
+        # If sandbox is set, check if target is inside sandbox
+        try:
+            if os.path.commonpath([sandbox_dir, target]) == sandbox_dir:
+                return target, True  # Inside sandbox - allowed
+        except ValueError:
+            pass
+        
+        # Outside sandbox - check if inside workspace (requires confirmation)
+        try:
+            inside_workspace = os.path.commonpath([active_root, target]) == active_root
+        except ValueError:
+            inside_workspace = False
+        
+        return target, inside_workspace  # Outside sandbox - needs confirmation if SANDBOX_REQUIRE_CONFIRM is True
+    
+    # No sandbox - use original workspace-only logic
     try:
         return target, os.path.commonpath([active_root, target]) == active_root
     except ValueError:
