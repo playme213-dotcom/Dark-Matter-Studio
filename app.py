@@ -2878,13 +2878,8 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         </div>
       </div>
 
-      <div style="display:flex;gap:6px;margin-bottom:8px">
-        <button id="start-colibri" style="flex:1;background:#155e75;padding:7px;border-radius:6px">Start Colibri server</button>
-        <button id="stop-colibri" style="flex:1;background:#7f1d1d;padding:7px;border-radius:6px">Stop managed server</button>
-      </div>
-      <div style="display:flex;gap:6px;margin-bottom:8px">
-        <button id="load-model" style="flex:1;background:#059669;padding:8px;border-radius:6px;font-weight:bold">Load</button>
-        <button id="unload-model" style="flex:1;background:#9f1239;padding:8px;border-radius:6px">Unload</button>
+      <div style="margin-bottom:8px">
+        <button id="apply-api-key" style="width:100%;background:#059669;padding:8px;border-radius:6px;font-weight:bold">Apply for API & Key</button>
       </div>
 
       <p id="loader-status" style="color:#94a3b8;margin:0 0 8px;font-size:11px">Checking backend…</p>
@@ -3099,8 +3094,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     function setLock() {
       if ($('loader-select')) $('loader-select').disabled = loaded;
       if ($('model-select')) $('model-select').disabled = loaded;
-      if ($('load-model')) $('load-model').disabled = loaded;
-      if ($('unload-model')) $('unload-model').disabled = !loaded;
+      if ($('apply-api-key')) $('apply-api-key').disabled = loaded;
       if ($('loader-status')) $('loader-status').textContent = loaded ? 'Model loaded · loader/model locked until unload' : 'Model unloaded · settings available';
     }
 
@@ -3169,32 +3163,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     });
 
     if ($('refresh-models')) $('refresh-models').onclick = refreshLoader;
-    if ($('start-colibri')) $('start-colibri').onclick = async () => {
+    if ($('apply-api-key')) $('apply-api-key').onclick = async () => {
       try {
-        const d = await sendLoaderAction('start_colibri');
-        if ($('agent-debug')) $('agent-debug').textContent = d.output || 'Colibri server started.';
-        await refreshLoader();
-      } catch (e) {
-        if ($('agent-debug')) $('agent-debug').textContent = e.message;
-      }
-    };
-    if ($('stop-colibri')) $('stop-colibri').onclick = async () => {
-      try {
-        const d = await sendLoaderAction('stop_colibri');
-        if ($('agent-debug')) $('agent-debug').textContent = d.output || 'Managed Colibri server stopped.';
-        await refreshLoader();
-      } catch (e) {
-        if ($('agent-debug')) $('agent-debug').textContent = e.message;
-      }
-    };
-    if ($('load-model')) $('load-model').onclick = async () => {
-      try { await sendLoaderAction('load'); refreshLoader(); }
-      catch (e) { if ($('agent-debug')) $('agent-debug').textContent = e.message; }
-    };
-    if ($('unload-model')) $('unload-model').onclick = async () => {
-      try {
-        const d = await sendLoaderAction('unload');
-        if ($('agent-debug')) $('agent-debug').textContent = d.output || 'Model unloaded.';
+        const d = await sendLoaderAction('configure');
+        if ($('agent-debug')) $('agent-debug').textContent = d.output || 'API & Key applied.';
         await refreshLoader();
       } catch (e) {
         if ($('agent-debug')) $('agent-debug').textContent = e.message;
