@@ -2855,20 +2855,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     <!-- Tab Panel: Agent Control -->
     <div id="panel-agent-control" class="tab-panel active space-y-6">
       <div>
-        <label class="text-xs text-slate-400 uppercase tracking-wider block mb-1">Loader</label>
-        <input id="loader-select" type="text" value="API" readonly style="width:100%;padding:8px;background:#111827;margin-bottom:8px;border:1px solid #334155;border-radius:6px;color:#e2e8f0;font:12px monospace">
+        <label class="text-xs text-slate-400 uppercase tracking-wider block mb-1">LOADER</label>
+        <input id="loader-select" type="text" value="http://127.0.0.1:4000" style="width:100%;padding:8px;background:#111827;margin-bottom:8px;border:1px solid #334155;border-radius:6px;color:#e2e8f0;font:12px monospace">
       </div>
 
       <div>
-        <label class="text-xs text-slate-400 uppercase tracking-wider block mb-1">API Input</label>
-        <div style="display:flex;gap:4px">
-          <input id="api-key-input" type="password" placeholder="sk-…" style="flex:1;padding:6px;background:#0f172a;border:1px solid #334155;border-radius:6px;color:#e2e8f0;font:10px monospace">
-          <button id="api-key-show" style="padding:6px 8px;background:#334155;border:1px solid #334155;border-radius:6px;color:#e2e8f0;cursor-pointer;font-size:10px">👁</button>
-        </div>
-      </div>
-
-      <div>
-        <label class="text-xs text-slate-400 uppercase tracking-wider block mb-1">API INPUT</label>
+        <label class="text-xs text-slate-400 uppercase tracking-wider block mb-1">KEY</label>
         <div style="display:flex;gap:4px">
           <input id="api-key-input" type="password" placeholder="sk-…" style="flex:1;padding:6px;background:#0f172a;border:1px solid #334155;border-radius:6px;color:#e2e8f0;font:10px monospace">
           <button id="api-key-show" style="padding:6px 8px;background:#334155;border:1px solid #334155;border-radius:6px;color:#e2e8f0;cursor-pointer;font-size:10px">👁</button>
@@ -3056,7 +3048,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     }
 
     async function refreshLoader() {
-      const loader = 'LiteLLM';
+      const loader = $('loader-select')?.value || 'http://127.0.0.1:4000';
       try {
         const r = await fetch('/api/loader');
         const d = await r.json();
@@ -3106,7 +3098,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     }
 
     async function refreshTokenLimits() {
-      const loader = 'LiteLLM';
+      const loader = $('loader-select')?.value || 'http://127.0.0.1:4000';
       const model = $('model-select')?.value || '';
       try {
         const r = await fetch(`/api/loader/limits?loader=${encodeURIComponent(loader)}&model=${encodeURIComponent(model)}`);
