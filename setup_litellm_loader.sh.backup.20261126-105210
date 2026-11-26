@@ -1,0 +1,450 @@
+#!/usr/bin/env bash
+# Configure the local LiteLLM bridge for Dark Matter Studio; launch Studio by default or Codex with --codex.
+set -Eeuo pipefail
+PROJECT="$HOME/colibri-bridge"
+VENV="$PROJECT"
+LITELLM="$VENV/bin/litellm"
+YAML="$PROJECT/config.yaml"
+HOOK="$PROJECT/context_saver.py"
+LOG="$PROJECT/litellm.log"
+ENV_DIR="$HOME/.config/colibri-bridge"
+ENV_FILE="$ENV_DIR/bridge.env"
+CODEX="$HOME/.codex"
+BIN_DIR="$HOME/.local/bin"
+NO_RUN=0
+RUN_CODEX=0
+for arg in "$@"; do
+  [[ "$arg" == "--no-run" ]] && NO_RUN=1
+  [[ "$arg" == "--codex" ]] && RUN_CODEX=1
+done
+
+BASE="https://result-outlook-shrewdly.ngrok-free.dev"
+STRATA="qwen3.8-flash-next-strata"
+STRATA_UPSTREAM="qwen3.8-flash-next-iq3_xxs"
+COLIBRI="qwen3-coder-30b-a3b-colibri"
+
+log(){ echo "[UBUNTU] $*"; }
+die(){ echo "[UBUNTU][ERROR] $*" >&2; exit 1; }
+backup(){ [[ ! -f "$1" ]] || cp -a "$1" "$1.backup.$(date +%Y%m%d-%H%M%S)"; }
+
+to_int_tokens() {
+  local v="${1,,}"
+  if [[ "$v" == "128k" ]]; then echo 131072
+  elif [[ "$v" =~ ^([0-9]+)k$ ]]; then echo $(( ${BASH_REMATCH[1]} * 1000 ))
+  else echo "$1"
+  fi
+}
+
+find_codex() {
+  if command -v codex >/dev/null 2>&1; then
+    command -v codex
+    return 0
+  fi
+  local candidate
+  for candidate in \
+    "$HOME/.local/bin/codex" \
+    "$HOME/.npm-global/bin/codex" \
+    /usr/local/bin/codex \
+    /home/*/.local/bin/codex \
+    /home/*/.npm-global/bin/codex \
+    /home/*/.nvm/versions/node/*/bin/codex \
+    /root/.nvm/versions/node/*/bin/codex; do
+    if [[ -x "$candidate" ]]; then
+      echo "$candidate"
+      return 0
+    fi
+  done
+  return 1
+}
+
+if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
+  die "Do not run this setup as root. Run it from the normal Ubuntu desktop user account."
+fi
+
+command -v python3 >/dev/null || die "python3 is required"
+command -v curl >/dev/null || die "curl is required"
+mkdir -p "$PROJECT" "$ENV_DIR" "$CODEX" "$BIN_DIR"
+chmod 700 "$ENV_DIR" "$CODEX"
+
+SCRIPT_DEST="$PROJECT/setup_litellm_colibri.sh"
+if [[ -f "${BASH_SOURCE[0]:-}" ]] && [[ "$(realpath "${BASH_SOURCE[0]}")" != "$(realpath -m "$SCRIPT_DEST")" ]]; then
+  cp -f "${BASH_SOURCE[0]}" "$SCRIPT_DEST"
+  chmod +x "$SCRIPT_DEST"
+fi
+
+# Preserve existing API keys from bridge.env while locking in finalized Strata settings
+if [[ -f "$ENV_FILE" ]]; then
+  _SAVED_KEY="$(grep -E '^export LITELLM_MASTER_KEY=' "$ENV_FILE" | cut -d"'" -f2 || true)"
+  _SAVED_COLIBRI="$(grep -E '^export COLIBRI_API_KEY=' "$ENV_FILE" | cut -d"'" -f2 || true)"
+  [[ -n "${LITELLM_MASTER_KEY:-}" ]] || LITELLM_MASTER_KEY="$_SAVED_KEY"
+  [[ -n "${COLIBRI_API_KEY:-}" ]] || COLIBRI_API_KEY="$_SAVED_COLIBRI"
+fi
+
+: "${STRATA_CONTEXT:=131072}"
+STRATA_CONTEXT="$(to_int_tokens "$STRATA_CONTEXT")"
+
+# Default compacting size to 75% of max context
+: "${STRATA_COMPACTING_SIZE:=$(( STRATA_CONTEXT * 75 / 100 ))}"
+STRATA_COMPACTING_SIZE="$(to_int_tokens "$STRATA_COMPACTING_SIZE")"
+
+: "${STRATA_THINKING:=medium}"
+: "${STRATA_REASONING_BUDGET:=1536}"
+: "${CODEX_AUTO_RUN:=1}"
+
+STRATA_THINKING="${STRATA_THINKING,,}"
+export STRATA_CONTEXT STRATA_COMPACTING_SIZE STRATA_THINKING STRATA_REASONING_BUDGET CODEX_AUTO_RUN
+
+if [[ -z "${LITELLM_MASTER_KEY:-}" ]]; then
+  LITELLM_MASTER_KEY="$(python3 -c 'import secrets; print("sk-" + secrets.token_urlsafe(36))')"
+fi
+export LITELLM_MASTER_KEY
+: "${COLIBRI_API_KEY:=not-needed}"
+export COLIBRI_API_KEY
+
+umask 077
+cat > "$ENV_FILE" <<EOF
+export LITELLM_MASTER_KEY='${LITELLM_MASTER_KEY}'
+export COLIBRI_API_KEY='${COLIBRI_API_KEY}'
+export STRATA_CONTEXT='${STRATA_CONTEXT}'
+export STRATA_COMPACTING_SIZE='${STRATA_COMPACTING_SIZE}'
+export STRATA_THINKING='${STRATA_THINKING}'
+export STRATA_REASONING_BUDGET='${STRATA_REASONING_BUDGET}'
+export CODEX_AUTO_RUN='${CODEX_AUTO_RUN}'
+EOF
+chmod 600 "$ENV_FILE"
+
+if [[ ! -x "$LITELLM" ]]; then
+  python3 -m venv "$VENV"
+  "$VENV/bin/python" -m pip install --upgrade pip
+  "$VENV/bin/python" -m pip install 'litellm[proxy]' PyYAML
+fi
+
+# --- LiteLLM Pre-Call Context Saver (Ubuntu-side enforcement) ---
+backup "$HOOK"
+cat > "$HOOK" <<'EOF'
+import hashlib
+import json
+import os
+import re
+import litellm
+from litellm.integrations.custom_logger import CustomLogger
+from openai import AsyncOpenAI
+
+COMPACT_TRIGGER_TOKENS = int(os.environ.get("STRATA_COMPACTING_SIZE", "102236"))
+STRATA_UPSTREAM_BASE = os.environ.get(
+    "STRATA_UPSTREAM_BASE", "https://result-outlook-shrewdly.ngrok-free.dev/strata/v1"
+)
+STRATA_UPSTREAM_MODEL = os.environ.get("STRATA_UPSTREAM_MODEL", "qwen3.8-flash-next-iq3_xxs")
+STRATA_THINKING = os.environ.get("STRATA_THINKING", "medium").lower()
+STRATA_REASONING_BUDGET = int(os.environ.get("STRATA_REASONING_BUDGET", "1536"))
+
+KEEP_RECENT_TURNS = 8
+MAX_OLD_TOOL_CHARS = 1200
+THINK_RE = re.compile(r"<think>.*?</think>\s*", re.DOTALL)
+
+_upstream_client = AsyncOpenAI(
+    base_url=STRATA_UPSTREAM_BASE,
+    api_key="not-needed",
+    default_headers={"ngrok-skip-browser-warning": "true"},
+)
+_compaction_cache: dict[str, str] = {}
+
+
+def _truncate_blob(text: str, limit: int = MAX_OLD_TOOL_CHARS) -> str:
+    if len(text) <= limit:
+        return text
+    head = int(limit * 0.65)
+    tail = limit - head
+    return f"{text[:head]}\n...[pruned {len(text) - limit} chars]...\n{text[-tail:]}"
+
+
+def _clean_chat_messages(messages: list[dict]) -> list[dict]:
+    """Strip completed reasoning and shrink stale tool outputs in Chat Completions payloads."""
+    last_user_idx = max((i for i, m in enumerate(messages) if m.get("role") == "user"), default=-1)
+    cutoff_idx = max(0, len(messages) - KEEP_RECENT_TURNS)
+    cleaned = []
+
+    for i, msg in enumerate(messages):
+        role = msg.get("role")
+        if role == "assistant" and i < last_user_idx:
+            new_msg = {k: v for k, v in msg.items() if k != "reasoning_content"}
+            if isinstance(new_msg.get("content"), str):
+                new_msg["content"] = THINK_RE.sub("", new_msg["content"]).strip()
+            cleaned.append(new_msg)
+        elif role == "tool" and i < cutoff_idx and isinstance(msg.get("content"), str):
+            cleaned.append({**msg, "content": _truncate_blob(msg["content"])})
+        else:
+            cleaned.append(msg)
+
+    return cleaned
+
+
+def _clean_responses_input(items: list) -> list:
+    """Strip completed reasoning items and prune old function_call_output items in Responses API payloads."""
+    last_user_idx = max(
+        (i for i, it in enumerate(items) if isinstance(it, dict) and it.get("role") == "user"),
+        default=-1,
+    )
+    cutoff_idx = max(0, len(items) - KEEP_RECENT_TURNS)
+    cleaned = []
+
+    for i, it in enumerate(items):
+        if not isinstance(it, dict):
+            cleaned.append(it)
+            continue
+        itype = it.get("type")
+        if itype == "reasoning" and i < last_user_idx:
+            continue
+        if it.get("role") == "assistant" and i < last_user_idx:
+            new_it = dict(it)
+            if isinstance(new_it.get("content"), str):
+                new_it["content"] = THINK_RE.sub("", new_it["content"]).strip()
+            elif isinstance(new_it.get("content"), list):
+                new_parts = []
+                for part in new_it["content"]:
+                    if isinstance(part, dict) and isinstance(part.get("text"), str):
+                        part = {**part, "text": THINK_RE.sub("", part["text"]).strip()}
+                    new_parts.append(part)
+                new_it["content"] = new_parts
+            cleaned.append(new_it)
+        elif itype == "function_call_output" and i < cutoff_idx and isinstance(it.get("output"), str):
+            cleaned.append({**it, "output": _truncate_blob(it["output"])})
+        else:
+            cleaned.append(it)
+
+    return cleaned
+
+
+def _apply_thinking_and_sampling(data: dict) -> None:
+    """Send Qwen3.8 medium reasoning effort and 1536-token budget per request to untouched Colab server."""
+    extra = data.setdefault("extra_body", {})
+    kwargs = extra.setdefault("chat_template_kwargs", {})
+
+    kwargs["enable_thinking"] = True
+    kwargs["reasoning_effort"] = STRATA_THINKING
+    extra["reasoning_budget"] = STRATA_REASONING_BUDGET
+
+    data.setdefault("temperature", 0.7)
+    data.setdefault("top_p", 0.95)
+
+    min_total_output = STRATA_REASONING_BUDGET + 3072
+    if data.get("max_tokens") is not None and data["max_tokens"] < min_total_output:
+        data["max_tokens"] = min_total_output
+
+
+async def _summarize_slice(slice_data: list) -> str:
+    slice_hash = hashlib.sha256(json.dumps(slice_data, sort_keys=True, default=str).encode()).hexdigest()
+    if slice_hash in _compaction_cache:
+        return _compaction_cache[slice_hash]
+
+    compact_payload = json.dumps(slice_data, default=str)
+    if len(compact_payload) > 180_000:
+        compact_payload = compact_payload[:180_000] + "\n...[truncated for summary]"
+
+    resp = await _upstream_client.chat.completions.create(
+        model=STRATA_UPSTREAM_MODEL,
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "Compress this coding session history into a dense factual state block. "
+                    "Keep: (1) primary goal & constraints, (2) exact file paths, commands, and symbols edited, "
+                    "(3) verified test/command outcomes, and (4) active errors or next steps. No filler."
+                ),
+            },
+            {"role": "user", "content": compact_payload},
+        ],
+        max_tokens=3072,
+        temperature=0.1,
+        extra_body={"chat_template_kwargs": {"enable_thinking": False}, "reasoning_budget": 0},
+    )
+    summary = THINK_RE.sub("", resp.choices[0].message.content or "").strip()
+    _compaction_cache[slice_hash] = summary
+    return summary
+
+
+class StrataContextSaver(CustomLogger):
+    async def async_pre_call_hook(self, user_api_key_dict, cache, data, call_type):
+        if isinstance(data.get("messages"), list):
+            msgs = _clean_chat_messages(data["messages"])
+            if len(msgs) > KEEP_RECENT_TURNS + 1:
+                est_tokens = litellm.token_counter(model="gpt-4o", messages=msgs)
+                if est_tokens >= COMPACT_TRIGGER_TOKENS:
+                    sys_msgs = [m for m in msgs if m.get("role") == "system"]
+                    non_sys = [m for m in msgs if m.get("role") != "system"]
+                    summary = await _summarize_slice(non_sys[:-KEEP_RECENT_TURNS])
+                    msgs = sys_msgs + [
+                        {"role": "assistant", "content": f"[COMPACTED HISTORY]\n{summary}"}
+                    ] + non_sys[-KEEP_RECENT_TURNS:]
+            data["messages"] = msgs
+
+        if isinstance(data.get("input"), list):
+            items = _clean_responses_input(data["input"])
+            if len(items) > KEEP_RECENT_TURNS + 1:
+                est_tokens = len(json.dumps(items, default=str)) // 3
+                if est_tokens >= COMPACT_TRIGGER_TOKENS:
+                    summary = await _summarize_slice(items[:-KEEP_RECENT_TURNS])
+                    items = [
+                        {"role": "assistant", "content": f"[COMPACTED HISTORY]\n{summary}"}
+                    ] + items[-KEEP_RECENT_TURNS:]
+            data["input"] = items
+
+        _apply_thinking_and_sampling(data)
+        return data
+
+
+proxy_handler_instance = StrataContextSaver()
+EOF
+chmod 600 "$HOOK"
+
+backup "$YAML"
+cat > "$YAML" <<EOF
+model_list:
+  - model_name: ${COLIBRI}
+    litellm_params:
+      model: custom_openai/${COLIBRI}
+      api_base: ${BASE}/v1
+      api_key: os.environ/COLIBRI_API_KEY
+      drop_params: true
+      extra_headers:
+        ngrok-skip-browser-warning: "true"
+  - model_name: ${STRATA}
+    litellm_params:
+      model: custom_openai/${STRATA_UPSTREAM}
+      api_base: ${BASE}/strata/v1
+      api_key: not-needed
+      drop_params: true
+      input_cost_per_token: 0.0
+      output_cost_per_token: 0.0
+      extra_headers:
+        ngrok-skip-browser-warning: "true"
+    model_info:
+      max_input_tokens: ${STRATA_CONTEXT}
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  allow_requests_on_db_unavailable: true
+  disable_spend_logs: true
+  disable_reset_budget: true
+litellm_settings:
+  callbacks: ["context_saver.proxy_handler_instance"]
+  drop_params: true
+EOF
+
+APPROVAL_POLICY="on-request"
+[[ "$CODEX_AUTO_RUN" == "1" ]] && APPROVAL_POLICY="never"
+
+backup "$CODEX/config.toml"
+backup "$CODEX/strata.config.toml"
+
+# Default config.toml (NO legacy profile = "strata" or [profiles.strata] table)
+cat > "$CODEX/config.toml" <<EOF
+model = "${COLIBRI}"
+model_provider = "colibri"
+model_context_window = ${STRATA_CONTEXT}
+model_auto_compact_token_limit = ${STRATA_COMPACTING_SIZE}
+hide_agent_reasoning = true
+
+[model_providers.colibri]
+name = "Colibri Qwen3 Coder"
+base_url = "http://127.0.0.1:4000/v1"
+env_key = "LITELLM_MASTER_KEY"
+wire_api = "responses"
+
+[tui]
+screen_reader_detection_done = true
+EOF
+
+# Dedicated Strata profile config file loaded by `codex --profile strata`
+cat > "$CODEX/strata.config.toml" <<EOF
+model = "${STRATA}"
+model_provider = "strata"
+model_context_window = ${STRATA_CONTEXT}
+model_auto_compact_token_limit = ${STRATA_COMPACTING_SIZE}
+model_reasoning_effort = "${STRATA_THINKING}"
+model_reasoning_summary = "none"
+hide_agent_reasoning = true
+approval_policy = "${APPROVAL_POLICY}"
+sandbox_mode = "workspace-write"
+
+[model_providers.strata]
+name = "Strata Qwen3.8 Flash Next"
+base_url = "http://127.0.0.1:4000/v1"
+env_key = "LITELLM_MASTER_KEY"
+wire_api = "responses"
+
+[tui]
+screen_reader_detection_done = true
+EOF
+
+# Install global wrapper (~/.local/bin/strata-codex)
+cat > "$BIN_DIR/strata-codex" <<'EOF'
+#!/usr/bin/env bash
+set -Eeuo pipefail
+ENV_FILE="$HOME/.config/colibri-bridge/bridge.env"
+if ! curl -fsS --max-time 2 http://127.0.0.1:4000/health/liveliness >/dev/null 2>&1; then
+  exec bash "$HOME/colibri-bridge/setup_litellm_codex.sh" "$@"
+fi
+[[ ! -f "$ENV_FILE" ]] || source "$ENV_FILE"
+CODEX_BIN="$(command -v codex || ls -1 "$HOME"/.local/bin/codex /usr/local/bin/codex /home/*/.nvm/versions/node/*/bin/codex /home/*/.npm-global/bin/codex 2>/dev/null | head -n1)"
+[[ -n "$CODEX_BIN" ]] || { echo "[ERROR] codex binary not found." >&2; exit 1; }
+export PATH="$(dirname "$CODEX_BIN"):$PATH"
+exec "$CODEX_BIN" --profile strata "$@"
+EOF
+chmod +x "$BIN_DIR/strata-codex"
+
+if pgrep -f "$LITELLM" >/dev/null; then
+  pkill -f "$LITELLM" || true
+  sleep 1
+fi
+
+log "Starting LiteLLM on port 4000..."
+nohup env PYTHONPATH="$PROJECT" \
+  LITELLM_MASTER_KEY="$LITELLM_MASTER_KEY" \
+  COLIBRI_API_KEY="$COLIBRI_API_KEY" \
+  STRATA_UPSTREAM_BASE="${BASE}/strata/v1" \
+  STRATA_UPSTREAM_MODEL="${STRATA_UPSTREAM}" \
+  STRATA_COMPACTING_SIZE="$STRATA_COMPACTING_SIZE" \
+  STRATA_THINKING="$STRATA_THINKING" \
+  STRATA_REASONING_BUDGET="$STRATA_REASONING_BUDGET" \
+  "$LITELLM" --config "$YAML" --host 127.0.0.1 --port 4000 >>"$LOG" 2>&1 </dev/null &
+
+ready=0
+for _ in $(seq 1 60); do
+  if curl -fsS --max-time 3 http://127.0.0.1:4000/health/liveliness >/dev/null 2>&1; then
+    ready=1
+    break
+  fi
+  sleep 2
+done
+[[ "$ready" == 1 ]] || { tail -n 80 "$LOG"; die "LiteLLM failed to start."; }
+
+log "Sync complete (Context: $STRATA_CONTEXT, Compacting: $STRATA_COMPACTING_SIZE, Thinking: $STRATA_THINKING, Budget: $STRATA_REASONING_BUDGET)."
+if [[ "$NO_RUN" == 1 ]]; then exit 0; fi
+
+source "$ENV_FILE"
+if [[ "$RUN_CODEX" == 1 ]]; then
+  CODEX_BIN="$(find_codex)" || die "codex binary not found."
+  export PATH="$(dirname "$CODEX_BIN"):$PATH"
+  log "Launching Codex ($CODEX_BIN --profile strata)..."
+  exec "$CODEX_BIN" --profile strata
+fi
+
+# Launch the Studio against this same local LiteLLM proxy. The proxy exposes
+# both configured aliases, while the selector chooses which alias is requested.
+STUDIO_APP="${COLIBRI_STUDIO_APP:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/app.py}"
+STUDIO_PY="${COLIBRI_STUDIO_PYTHON:-$(dirname "$STUDIO_APP")/venv/bin/python}"
+if [[ ! -x "$STUDIO_PY" && -x /home/local-ai/venv/bin/python3 ]]; then STUDIO_PY=/home/local-ai/venv/bin/python3; fi
+[[ -x "$STUDIO_PY" ]] || STUDIO_PY="$(command -v python3)"
+[[ -f "$STUDIO_APP" ]] || die "Colibri Studio app.py not found: $STUDIO_APP"
+export LITELLM_BASE_URL="http://127.0.0.1:4000"
+export LITELLM_MASTER_KEY
+export LITELLM_COLIBRI_MODEL="$COLIBRI"
+export LITELLM_STRATA_MODEL="$STRATA"
+export LITELLM_MODE="${LITELLM_MODE:-colibri}"
+export COLIBRI_DEFAULT_LOADER=LiteLLM
+export COLIBRI_CONTEXT_WINDOW="$STRATA_CONTEXT"
+export COLIBRI_COMPACT_PERCENT=78
+export COLIBRI_STUDIO_PYTHON="$STUDIO_PY"
+log "Launching Colibri Studio with LiteLLM modes: Colibri ($COLIBRI) and Strata ($STRATA)."
+cd "$(dirname "$STUDIO_APP")"
+exec "$STUDIO_PY" "$STUDIO_APP"

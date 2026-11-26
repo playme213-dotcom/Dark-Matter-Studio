@@ -1,0 +1,110 @@
+import json
+import os
+import tempfile
+import unittest
+
+import app
+
+
+class PureHelperTests(unittest.TestCase):
+    def test_looks_like_user_question_detects_markers(self):
+        self.assertTrue(app.looks_like_user_question("Should I proceed?"))
+        self.assertTrue(app.looks_like_user_question("Do you want me to delete it?"))
+        self.assertTrue(app.looks_like_user_question("Please confirm: yes or no?"))
+        self.assertTrue(app.looks_like_user_question("Can I continue?"))
+
+    def test_looks_like_user_question_ignores_plain_text(self):
+        self.assertFalse(app.looks_like_user_question("I edited the file successfully."))
+        self.assertFalse(app.looks_like_user_question("The tests passed."))
+        self.assertFalse(app.looks_like_user_question(""))
+
+    def test_build_plan_checklist(self):
+        plan = app.build_plan_checklist(3, 1, "running")
+        self.assertEqual(len(plan), 3)
+        self.assertEqual(plan[0]["status"], "done")
+        self.assertEqual(plan[1]["status"], "running")
+        self.assertEqual(plan[2]["status"], "pending")
+
+    def test_build_plan_checklist_clamps_step(self):
+        plan = app.build_plan_checklist(2, 9, "complete")
+        self.assertEqual([item["status"] for item in plan], ["done", "done"])
+
+
+def _make_fake_post(counter, seen_payloads):
+    class FakeSSE:
+        status_code = 200
+        headers = {"content-type": "text/event-stream"}
+
+        def __init__(self, payload):
+            self.payload = payload or {}
+
+        def iter_lines(self):
+            msgs = self.payload.get("messages", [])
+            last = str((msgs[-1].get("content") if msgs else "") or "")
+            seen_payloads.append(last)
+            if counter[0] == 0:
+                content = "Should I proceed? <task_status>continue</task_status>"
+            else:
+                content = "All done. <task_status>complete</task_status>"
+            counter[0] += 1
+            yield ("data: " + json.dumps({"choices": [{"delta": {"content": content}}]})).encode("utf-8")
+            yield b"data: [DONE]"
+
+        def close(self):
+            pass
+
+    def fake_post(url, json=None, headers=None, stream=False, timeout=None, **kwargs):
+        return FakeSSE(json)
+
+    return fake_post
+
+
+class AgentLoopQuestionTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
+        self.tmp.close()
+        app.DB_PATH = self.tmp.name
+        app.init_db()
+        app.LOADER_STATE["loader"] = "Colibri"
+        app.LOADER_STATE["model"] = "test-model"
+        self._real_post = app.requests.post
+
+    def tearDown(self):
+        app.requests.post = self._real_post
+        try:
+            os.unlink(self.tmp.name)
+        except OSError:
+            pass
+
+    def _run(self, resume_answer=None, question_mode="manual"):
+        app.LOADER_STATE["settings"] = {
+            "temperature": 0.2, "top_p": 0.9, "num_predict": 256,
+            "question_mode": question_mode,
+        }
+        counter = [0]
+        seen = []
+        app.requests.post = _make_fake_post(counter, seen)
+        events = []
+        for raw in app.event_stream("Do the task", "sess-1", "off", resume_answer):
+            payload = json.loads(raw.replace("data: ", "").strip())
+            events.append(payload)
+        return events, seen
+
+    def test_manual_mode_pauses_on_question(self):
+        events, _ = self._run()
+        types = [e.get("type") for e in events]
+        self.assertIn("user_question", types)
+        self.assertNotIn("complete", types)
+        question_event = next(e for e in events if e.get("type") == "user_question")
+        self.assertIn("Should I proceed", question_event["question"])
+
+    def test_manual_mode_resume_continues_to_completion(self):
+        # First run pauses.
+        first_events, _ = self._run()
+        self.assertIn("user_question", [e.get("type") for e in first_events])
+        # Resume run injects the answer and completes.
+        resume_events, seen = self._run(resume_answer="yes")
+        types = [e.get("type") for e in resume_events]
+        self.assertIn("complete", types)
+        self.assertNotIn("user_question", types)
+        self.assertTrue(any("USER ANSWER TO PAUSED QUESTION: yes" in text for text in seen

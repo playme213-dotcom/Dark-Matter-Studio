@@ -1,0 +1,24 @@
+import unittest
+import app
+
+class ProviderAgentLoopTests(unittest.TestCase):
+    def test_guide_is_provider_aware_for_all_web_modes(self):
+        for provider in ("gemini", "chatgpt", "claude"):
+            with self.subTest(provider=provider):
+                guide = app.build_web_extension_tool_guide(provider)
+                self.assertIn(f"PROVIDER: {provider.upper()}", guide)
+                self.assertIn("<task_status>complete</task_status>", guide)
+                self.assertIn("<task_status>continue</task_status>", guide)
+                self.assertIn("AUTONOMOUS AGENT↔COLIBRI JOB LOOP", guide)
+                self.assertIn("<tool_call>", guide)
+
+    def test_loop_is_unbounded_until_controller_stop_condition(self):
+        import pathlib
+        source = pathlib.Path(app.__file__).read_text(encoding="utf-8")
+        self.assertNotIn("MAX_AGENT_STEPS", source)
+        self.assertIn("while True:", source)
+        self.assertIn("task_completion_confirmed", source)
+        self.assertIn("ACTIVE_ABORTS", source)
+
+if __name__ == "__main__":
+    unittest.main()
