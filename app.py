@@ -2858,7 +2858,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         <label class="text-xs text-slate-400 uppercase tracking-wider block mb-1">Loader</label>
         <select id="loader-select" style="width:100%;padding:8px;background:#111827;margin-bottom:8px;border:1px solid #334155;border-radius:6px">
           <option>Colibri</option>
-          <option value="LiteLLM" selected>LiteLLM</option>
+          <option value="LiteLLM" selected>API</option>
         </select>
       </div>
 
