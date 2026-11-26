@@ -2856,10 +2856,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     <div id="panel-agent-control" class="tab-panel active space-y-6">
       <div>
         <label class="text-xs text-slate-400 uppercase tracking-wider block mb-1">Loader</label>
-        <select id="loader-select" style="width:100%;padding:8px;background:#111827;margin-bottom:8px;border:1px solid #334155;border-radius:6px">
-          <option>Colibri</option>
-          <option value="LiteLLM" selected>API</option>
-        </select>
+        <input id="loader-select" type="text" value="API" readonly style="width:100%;padding:8px;background:#111827;margin-bottom:8px;border:1px solid #334155;border-radius:6px;color:#e2e8f0;font:12px monospace">
       </div>
 
       <div>
@@ -3063,12 +3060,10 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     }
 
     async function refreshLoader() {
-      const loader = $('loader-select')?.value || 'Colibri';
+      const loader = 'LiteLLM';
       try {
         const r = await fetch('/api/loader');
         const d = await r.json();
-        const activeLoader = d.loader || loader;
-        if ($('loader-select')) $('loader-select').value = activeLoader;
         const models = d.models || [];
         const modelSelect = $('model-select');
         if (modelSelect) {
@@ -3092,7 +3087,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     }
 
     function setLock() {
-      if ($('loader-select')) $('loader-select').disabled = loaded;
+
       if ($('model-select')) $('model-select').disabled = loaded;
       if ($('apply-api-key')) $('apply-api-key').disabled = loaded;
       if ($('loader-status')) $('loader-status').textContent = loaded ? 'Model loaded · loader/model locked until unload' : 'Model unloaded · settings available';
@@ -3115,7 +3110,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     }
 
     async function refreshTokenLimits() {
-      const loader = $('loader-select')?.value || 'Colibri';
+      const loader = 'LiteLLM';
       const model = $('model-select')?.value || '';
       try {
         const r = await fetch(`/api/loader/limits?loader=${encodeURIComponent(loader)}&model=${encodeURIComponent(model)}`);
@@ -3138,7 +3133,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
     }
 
     async function sendLoaderAction(action) {
-      const payload = { action, loader: $('loader-select').value, model: $('model-select')?.value || '', api_key: $('api-key-input')?.value || '', ...settings() };
+      const payload = { action, loader: 'LiteLLM', model: $('model-select')?.value || '', api_key: $('api-key-input')?.value || '', ...settings() };
       const r = await fetch('/api/loader', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
       const d = await r.json();
       if (!r.ok) throw Error(d.output || 'Request failed');
@@ -3147,11 +3142,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       return d;
     }
 
-    $('loader-select')?.addEventListener('change', async () => {
-      await refreshLoader();
-      await refreshTokenLimits();
-      await refreshThinkingCapability();
-    });
+
 
     $('model-select')?.addEventListener('change', () => {
       refreshTokenLimits();
@@ -3411,7 +3402,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
           const r = await fetch('/api/loader', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
-            body: JSON.stringify({action: 'configure', loader: $('loader-select')?.value || 'Colibri', model: selected, api_key: $('api-key-input')?.value || ''})
+            body: JSON.stringify({action: 'configure', loader: 'LiteLLM', model: selected, api_key: $('api-key-input')?.value || ''})
           });
           const d = await r.json();
           if (!r.ok) throw Error(d.output || 'Request failed');
