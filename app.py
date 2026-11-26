@@ -2867,6 +2867,14 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         </div>
       </div>
 
+      <div>
+        <label class="text-xs text-slate-400 uppercase tracking-wider block mb-1">Model</label>
+        <div id="model-select-wrap" style="display:flex;gap:5px;margin-bottom:8px;align-items:center">
+          <input id="model-select" type="text" placeholder="model name" style="flex:1;padding:8px;background:#111827;border:1px solid #334155;border-radius:6px;color:#e2e8f0;font:12px monospace">
+          <button id="refresh-models" title="Refresh models" style="padding:6px 10px;background:#111827;border:1px solid #334155;border-radius:6px;color:#e2e8f0">↻</button>
+        </div>
+      </div>
+
       <p id="loader-status" style="color:#94a3b8;margin:0 0 8px;font-size:11px">Checking backend…</p>
       <p id="context-compaction-status" style="color:#94a3b8;font-size:10px;margin:0 0 8px">Context auto-compaction: ON · 75% trigger · persistent summaries</p>
 
