@@ -20,8 +20,7 @@ API_KEY="sk-$(python3 -c "import secrets; print(secrets.token_urlsafe(36))")"
 printf 'export DARK_MATTER_API_KEY="%s"\n' "$API_KEY" > "$ENV_FILE"
 chmod 600 "$ENV_FILE"
 echo "API key saved to $ENV_FILE"
-for name in agy dms; do
-  cat > "$BIN_DIR/$name" <<'LAUNCHER'
+cat > "$BIN_DIR/dms" <<'LAUNCHER'
 #!/usr/bin/env bash
 set -Eeuo pipefail
 ENV_FILE="{{ENV_FILE}}"
@@ -32,12 +31,11 @@ export DARK_MATTER_API_KEY="{{API_KEY}}"
 cd "$STUDIO_DIR"
 exec "$STUDIO_PY" "$STUDIO_DIR/app.py" "$@"
 LAUNCHER
-  sed -i "s|{{ENV_FILE}}|$ENV_FILE|g" "$BIN_DIR/$name"
-  sed -i "s|{{STUDIO_DIR}}|$STUDIO_DIR|g" "$BIN_DIR/$name"
-  sed -i "s|{{API_KEY}}|$API_KEY|g" "$BIN_DIR/$name"
-  chmod +x "$BIN_DIR/$name"
-done
-echo "Installation complete. Run: dms (or agy)"
+sed -i "s|{{ENV_FILE}}|$ENV_FILE|g" "$BIN_DIR/dms"
+sed -i "s|{{STUDIO_DIR}}|$STUDIO_DIR|g" "$BIN_DIR/dms"
+sed -i "s|{{API_KEY}}|$API_KEY|g" "$BIN_DIR/dms"
+chmod +x "$BIN_DIR/dms"
+echo "Installation complete. Run: dms"
 if [[ "$NO_RUN" == 1 ]]; then
   exit 0
 fi

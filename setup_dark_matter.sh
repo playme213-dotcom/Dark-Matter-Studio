@@ -22,7 +22,7 @@ log(){ echo "[DARK-MATTER] $*"; }
 die(){ echo "[DARK-MATTER][ERROR] $*" >&2; exit 1; }
 
 if [[ "${EUID:-$(id -u)}" -eq 0 ]]; then
-  die "Do not run this setup as root. Run it from the normal Ubuntu desktop user account."
+  die "Do not run this setup as root. Run it from the normal desktop user account."
 fi
 
 command -v python3 >/dev/null || die "python3 is required"
@@ -30,7 +30,6 @@ command -v python3 >/dev/null || die "python3 is required"
 mkdir -p "$ENV_DIR" "$BIN_DIR"
 chmod 700 "$ENV_DIR"
 
-# Preserve existing API key
 if [[ -f "$ENV_FILE" ]]; then
   _SAVED_KEY="$(grep -E '^export DARK_MATTER_API_KEY=' "$ENV_FILE" | cut -d"'" -f2 || true)"
   [[ -n "${DARK_MATTER_API_KEY:-}" ]] || DARK_MATTER_API_KEY="$_SAVED_KEY"
@@ -49,13 +48,11 @@ chmod 600 "$ENV_FILE"
 
 log "Dark Matter Studio configured. API key saved to $ENV_FILE"
 
-# Install shell-linkable launchers (agy and dms)
 if [[ "$INSTALL_LAUNCHERS" == 1 ]]; then
-  for name in agy dms; do
-    cat > "$BIN_DIR/$name" <<LAUNCHER
+  cat > "$BIN_DIR/dms" <<LAUNCHER
 #!/usr/bin/env bash
 set -Eeuo pipefail
-# $name — Dark Matter Studio launcher (shell-linkable, like codex)
+# dms — Dark Matter Studio launcher (shell-linkable, like codex)
 ENV_FILE="$ENV_FILE"
 STUDIO_DIR="$STUDIO_DIR"
 STUDIO_PY="$STUDIO_PY"
@@ -67,10 +64,9 @@ export DARK_MATTER_API_KEY="${DARK_MATTER_API_KEY}"
 cd "\$STUDIO_DIR"
 exec "\$STUDIO_PY" "\$STUDIO_DIR/app.py" "\$@"
 LAUNCHER
-    chmod +x "$BIN_DIR/$name"
-    log "Installed '$name' launcher to $BIN_DIR/$name"
-  done
-  log "Make sure $BIN_DIR is on your PATH, then run: agy  or  dms"
+  chmod +x "$BIN_DIR/dms"
+  log "Installed 'dms' launcher to $BIN_DIR/dms"
+  log "Make sure $BIN_DIR is on your PATH, then run: dms"
 fi
 
 if [[ "$NO_RUN" == 1 ]]; then

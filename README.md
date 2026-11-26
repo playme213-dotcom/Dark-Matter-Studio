@@ -17,7 +17,7 @@ Autonomous local AI agent studio — a Flask-based desktop orchestration environ
 | Coda refinement | Iterative refinement loop (from coda.json, {"loops": 3}) that re-feeds the assistant output to improve clarity/correctness before completion. |
 | Loop count control | Configurable max_loop_turns (default 10) for the main agent loop and swarm runs. |
 | Auto-update routes | /api/update/check and /api/update/apply (requires confirmed=true). |
-| Shell launchers | agy and dms — launch Dark Matter Studio from anywhere, like codex. |
+| Shell launchers | dms — launch Dark Matter Studio from anywhere, like codex. |
 
 ## Quick Start
 
@@ -28,7 +28,7 @@ Autonomous local AI agent studio — a Flask-based desktop orchestration environ
 git clone https://github.com/playme213-dotcom/Dark-Matter-Studio.git
 cd Dark-Matter-Studio
 
-# Install (configures API key, installs agy/dms launchers, launches Studio)
+# Install (configures API key, installs dms launcher, launches Studio)
 bash install.sh
 
 # Or install only (no launch)
@@ -43,7 +43,6 @@ After install, ~/.local/bin must be on your PATH:
 export PATH="$HOME/.local/bin:$PATH"
 
 dms        # launch Dark Matter Studio
-agy        # alternative launcher (same behavior)
 ```
 
 Then open http://127.0.0.1:5000 in your browser.
@@ -62,11 +61,10 @@ export DARK_MATTER_API_KEY="sk-..."
 | Launcher | Path | Purpose |
 |----------|------|---------|
 | dms | ~/.local/bin/dms | Dark Matter Studio launcher |
-| agy | ~/.local/bin/agy | Alternative launcher (same behavior) |
 
 Both source ~/.config/dark-matter/studio.env for the API key, cd to the studio directory, and run app.py.
 
-Install them manually with:
+Install it manually with:
 ```bash
 bash setup_dark_matter.sh --install-launchers
 ```
