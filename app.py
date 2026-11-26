@@ -290,36 +290,43 @@ def _compact_messages_for_request(session_id, messages, model, settings):
             report["summary_error"] = str(summary_error)
     CONTEXT_LAST_REPORT = {k: v for k, v in report.items() if k not in ("messages", "entries")}
 
-    CONTEXT_LAST_REPORT = {k: v for k, v in report.items() if k not in ("messages", "entries")}
-
-    # --- MAX_CONTEXT_TOKENS hard limit: trim oldest 50% if exceeded ---
+    # --- MAX_CONTEXT_TOKENS hard limit: keep latest 50% raw, summarize oldest 50% ---
     try:
-        from context_manager import messages_tokens
+        from context_manager import messages_tokens, estimate_tokens
         total_tokens = messages_tokens(rebuilt)
         max_ctx = MAX_CONTEXT_TOKENS
         if max_ctx > 0 and total_tokens > max_ctx:
             # Separate system messages from non-system
             system_msgs = [m for m in rebuilt if m.get("role") == "system"]
             non_system = [m for m in rebuilt if m.get("role") != "system"]
-            if len(non_system) > 2:
-                # Trim oldest 50% of non-system messages
-                keep_count = max(2, len(non_system) // 2)
-                trimmed = non_system[-keep_count:]
-                removed = non_system[:-keep_count]
+            if len(non_system) > 4:
+                # Split: oldest 50% to summarize, latest 50% to keep raw
+                split_idx = len(non_system) // 2
+                oldest_half = non_system[:split_idx]
+                latest_half = non_system[split_idx:]
 
-                # Build a digest of removed messages (NOT sent to model)
+                # Build a summary digest from oldest half (NOT sent as raw messages)
                 removed_parts = []
-                for m in removed[:20]:
+                for m in oldest_half:
+                    role = str(m.get("role", "user"))
                     r = str(m.get("content", "") or "")
-                    removed_parts.append(f"[{m.get('role', 'user')}] {r[:200]}")
+                    removed_parts.append(f"[{role}] {r[:300]}")
                 removed_text = "\n".join(removed_parts)
-                if len(removed) > 20:
-                    removed_text += "\n...and " + str(len(removed) - 20) + " more messages"
-                digest_content = f"[CONTEXT COMPACTED — {len(removed)} older messages removed to stay within {max_ctx} token limit. Earlier conversation: {removed_text}]"
+                if len(oldest_half) > 20:
+                    removed_text += f"\n...and {len(oldest_half) - 20} more messages"
+                digest_content = f"[CONTEXT COMPACTED — {len(oldest_half)} older messages summarized to stay within {max_ctx} token limit. Earlier conversation summary: {removed_text}]"
 
-                rebuilt = system_msgs + [{"role": "system", "content": digest_content}] + trimmed
+                rebuilt = system_msgs + [{"role": "system", "content": digest_content}] + latest_half
 
                 # Update CONTEXT_LAST_REPORT
+                CONTEXT_LAST_REPORT["context_compacted_max"] = True
+                CONTEXT_LAST_REPORT["tokens_before"] = total_tokens
+                CONTEXT_LAST_REPORT["tokens_after"] = messages_tokens(rebuilt)
+                CONTEXT_LAST_REPORT["messages_before"] = len(messages)
+                CONTEXT_LAST_REPORT["messages_after"] = len(rebuilt)
+            elif len(non_system) > 2:
+                # Too few messages to split, keep latest few
+                rebuilt = system_msgs + non_system[-2:]
                 CONTEXT_LAST_REPORT["context_compacted_max"] = True
                 CONTEXT_LAST_REPORT["tokens_before"] = total_tokens
                 CONTEXT_LAST_REPORT["tokens_after"] = messages_tokens(rebuilt)
@@ -331,7 +338,6 @@ def _compact_messages_for_request(session_id, messages, model, settings):
         CONTEXT_LAST_REPORT["max_context_error"] = str(compact_err)
 
     return rebuilt
-
 
 def _web_extension_cleanup():
     now = time.time()
