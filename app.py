@@ -2868,15 +2868,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       </div>
 
       <div>
-        <label class="text-xs text-slate-400 uppercase tracking-wider block mb-1">Model</label>
-        <div id="model-select-wrap" style="display:flex;gap:5px;margin-bottom:8px;align-items:center">
-          <select id="model-select" style="flex:1;padding:8px;background:#111827;border:1px solid #334155;border-radius:6px;color:#e2e8f0;font:12px monospace"></select>
-          <button id="refresh-models" title="Refresh models" style="padding:6px 10px;background:#111827;border:1px solid #334155;border-radius:6px;color:#e2e8f0">↻</button>
+        <label class="text-xs text-slate-400 uppercase tracking-wider block mb-1">API INPUT</label>
+        <div style="display:flex;gap:4px">
+          <input id="api-key-input" type="password" placeholder="sk-…" style="flex:1;padding:6px;background:#0f172a;border:1px solid #334155;border-radius:6px;color:#e2e8f0;font:10px monospace">
+          <button id="api-key-show" style="padding:6px 8px;background:#334155;border:1px solid #334155;border-radius:6px;color:#e2e8f0;cursor-pointer;font-size:10px">👁</button>
         </div>
-      </div>
-
-      <div style="margin-bottom:8px">
-        <button id="apply-api-key" style="width:100%;background:#059669;padding:8px;border-radius:6px;font-weight:bold">Apply for API & Key</button>
       </div>
 
       <p id="loader-status" style="color:#94a3b8;margin:0 0 8px;font-size:11px">Checking backend…</p>
