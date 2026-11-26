@@ -112,7 +112,8 @@ def _litellm_auth_headers():
     return {"Authorization": "Bearer " + key} if key else {}
 
 CONTEXT_WINDOW_DEFAULT = int(os.environ.get("COLIBRI_CONTEXT_WINDOW", "65536"))
-CONTEXT_COMPACT_PERCENT = float(os.environ.get("COLIBRI_COMPACT_PERCENT", "78"))
+CONTEXT_COMPACT_PERCENT = float(os.environ.get("COLIBRI_COMPACT_PERCENT", "75"))
+MAX_CONTEXT_TOKENS = int(os.environ.get("COLIBRI_MAX_CONTEXT_TOKENS", "0"))  # 0 = no limit
 PYTHON_ENV_CONFIG = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".python_environment.json")
 CONTEXT_LAST_REPORT = {}
 CONTEXT_SUMMARY_EXTRA_PROMPT = os.environ.get("COLIBRI_CONTEXT_SUMMARY_PROMPT", "").strip()
@@ -288,6 +289,47 @@ def _compact_messages_for_request(session_id, messages, model, settings):
         except Exception as summary_error:
             report["summary_error"] = str(summary_error)
     CONTEXT_LAST_REPORT = {k: v for k, v in report.items() if k not in ("messages", "entries")}
+
+    CONTEXT_LAST_REPORT = {k: v for k, v in report.items() if k not in ("messages", "entries")}
+
+    # --- MAX_CONTEXT_TOKENS hard limit: trim oldest 50% if exceeded ---
+    try:
+        from context_manager import messages_tokens
+        total_tokens = messages_tokens(rebuilt)
+        max_ctx = MAX_CONTEXT_TOKENS
+        if max_ctx > 0 and total_tokens > max_ctx:
+            # Separate system messages from non-system
+            system_msgs = [m for m in rebuilt if m.get("role") == "system"]
+            non_system = [m for m in rebuilt if m.get("role") != "system"]
+            if len(non_system) > 2:
+                # Trim oldest 50% of non-system messages
+                keep_count = max(2, len(non_system) // 2)
+                trimmed = non_system[-keep_count:]
+                removed = non_system[:-keep_count]
+
+                # Build a digest of removed messages (NOT sent to model)
+                removed_parts = []
+                for m in removed[:20]:
+                    r = str(m.get("content", "") or "")
+                    removed_parts.append(f"[{m.get('role', 'user')}] {r[:200]}")
+                removed_text = "\n".join(removed_parts)
+                if len(removed) > 20:
+                    removed_text += "\n...and " + str(len(removed) - 20) + " more messages"
+                digest_content = f"[CONTEXT COMPACTED — {len(removed)} older messages removed to stay within {max_ctx} token limit. Earlier conversation: {removed_text}]"
+
+                rebuilt = system_msgs + [{"role": "system", "content": digest_content}] + trimmed
+
+                # Update CONTEXT_LAST_REPORT
+                CONTEXT_LAST_REPORT["context_compacted_max"] = True
+                CONTEXT_LAST_REPORT["tokens_before"] = total_tokens
+                CONTEXT_LAST_REPORT["tokens_after"] = messages_tokens(rebuilt)
+        elif total_tokens > max_ctx:
+            # Fewer than 2 non-system messages, just keep what we have
+            CONTEXT_LAST_REPORT["tokens_before"] = total_tokens
+            CONTEXT_LAST_REPORT["tokens_after"] = total_tokens
+    except Exception as compact_err:
+        CONTEXT_LAST_REPORT["max_context_error"] = str(compact_err)
+
     return rebuilt
 
 
