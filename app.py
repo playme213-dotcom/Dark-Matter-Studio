@@ -2907,11 +2907,6 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         </div>
       </details>
 
-      <div style="margin:0 0 8px">
-        <label class="text-xs text-slate-400 uppercase tracking-wider block">Max Loop Turns</label>
-        <input id="max-loop-turns" type="number" value="10" min="1" max="100" style="width:100%;padding:6px;background:#0f172a;border:1px solid #334155;border-radius:6px;color:#e2e8f0">
-      </div>
-
       <details id="loader-parameters-details" open style="border-top:1px solid #263244;padding-top:12px"><summary id="loader-param-heading" style="cursor:pointer;color:#cbd5e1;font-weight:bold">Request Parameters</summary>
         <label>Temperature <span id="temp-val">0.2</span></label><input id="temperature" type="range" min="0" max="2" step="0.1" value="0.2" style="width:100%">
         <label>Top-p <span id="top-p-val">0.9</span></label><input id="top-p" type="range" min="0.1" max="1" step="0.05" value="0.9" style="width:100%">
