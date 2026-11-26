@@ -2869,9 +2869,9 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
 
       <div>
         <label class="text-xs text-slate-400 uppercase tracking-wider block mb-1">Model</label>
-        <div id="model-select-wrap" style="display:flex;gap:5px;margin-bottom:8px;align-items:stretch">
-          <select id="model-select" size="5" aria-label="Available models" style="min-width:0;flex:1;height:126px;max-height:126px;overflow-y:auto;padding:6px;background:#111827;border:1px solid #334155;border-radius:6px"></select>
-          <button id="refresh-models" title="Refresh models" style="align-self:flex-start">↻</button>
+        <div id="model-select-wrap" style="display:flex;gap:5px;margin-bottom:8px;align-items:center">
+          <select id="model-select" style="flex:1;padding:8px;background:#111827;border:1px solid #334155;border-radius:6px;color:#e2e8f0;font:12px monospace"></select>
+          <button id="refresh-models" title="Refresh models" style="padding:6px 10px;background:#111827;border:1px solid #334155;border-radius:6px;color:#e2e8f0">↻</button>
         </div>
       </div>
 
