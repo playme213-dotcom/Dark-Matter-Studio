@@ -2693,11 +2693,11 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
         <span class="text-emerald-400 text-lg font-bold tracking-tight flex items-center gap-2">
           <i class="fa-solid fa-bolt-lightning animate-glow"></i> Dark Matter Studio
         </span>
-        <span class="text-xs bg-slate-800 text-slate-300 px-2.5 py-0.5 rounded border border-slate-700 hidden sm:inline-block">Qwen3-Coder 30B • Payload Verified</span>
+        <span class="text-xs bg-slate-800/50 text-slate-300 px-3 py-1.5 rounded-full border border-slate-700/50 flex items-center gap-1.5 hidden sm:inline-block"><i class="fa-solid fa-check-circle text-[10px] text-emerald-400"></i> Qwen3-Coder 30B • Payload Verified</span>
       </div>
 
       <div class="flex items-center space-x-3 text-xs">
-        <button id="connection-test-btn" type="button" class="px-2.5 py-1 rounded bg-slate-800/80 hover:bg-slate-700 border border-slate-700 text-slate-200 flex items-center gap-1.5 cursor-pointer transition" title="Test live connection to active inference endpoint">
+        <button id="connection-test-btn" type="button" class="px-3 py-1.5 rounded-full bg-slate-800/50 hover:bg-slate-700 border border-slate-700/50 text-slate-200 flex items-center gap-1.5 cursor-pointer transition text-xs" title="Test live connection to active inference endpoint">
           <span id="conn-test-dot" class="w-2 h-2 rounded-full bg-emerald-400"></span>
           <span id="conn-test-label">Connection Test</span>
         </button>
