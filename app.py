@@ -2863,7 +2863,7 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       </div>
 
       <div>
-        <label class="text-xs text-slate-400 uppercase tracking-wider block mb-1">API Key</label>
+        <label class="text-xs text-slate-400 uppercase tracking-wider block mb-1">API Input</label>
         <div style="display:flex;gap:4px">
           <input id="api-key-input" type="password" placeholder="sk-…" style="flex:1;padding:6px;background:#0f172a;border:1px solid #334155;border-radius:6px;color:#e2e8f0;font:10px monospace">
           <button id="api-key-show" style="padding:6px 8px;background:#334155;border:1px solid #334155;border-radius:6px;color:#e2e8f0;cursor-pointer;font-size:10px">👁</button>
