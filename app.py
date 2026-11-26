@@ -2879,6 +2879,12 @@ HTML_TEMPLATE = r"""<!DOCTYPE html>
       <p id="context-compaction-status" style="color:#94a3b8;font-size:10px;margin:0 0 8px">Context auto-compaction: ON · 75% trigger · persistent summaries</p>
 
       <details style="margin:0 0 8px"><summary style="cursor:pointer;color:#a7f3d0;font-weight:bold">Tool Toggles</summary>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:6px">
+          <label style="display:flex;align-items:center;gap:8px;font-size:10px">
+            <input type="checkbox" id="toggle-tools" checked style="accent-color:#10b981">
+            <span>Tools</span>
+          </label>
+        </div>
         <div id="tool-toggles" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:6px"></div>
         <div style="margin-top:6px">
           <label style="display:flex;align-items:center;gap:8px;font-size:10px">
